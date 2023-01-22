@@ -1,8 +1,12 @@
-use std::collections::HashMap;
-use std::io;
-use std::io::BufRead;
+extern crate core;
 
-mod batchet_thread;
+use std::collections::HashMap;
+use std::{io, thread};
+use std::borrow::BorrowMut;
+use std::io::BufRead;
+use std::sync::{Arc, Mutex};
+use std::thread::Thread;
+
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 enum Player {
@@ -24,7 +28,7 @@ const DEBUG: bool = false;
 const CACHE_SIZE: usize = 10_000;
 
 /// moves must be in ascending order
-fn batchet_turn(nb_stones: usize, moves: &Vec<usize>, curr_player: Player, depth: usize, cache: &mut HashMap<usize, (Player, Player)>) -> Player {
+fn batchet_turn(nb_stones: usize, moves: &Vec<usize>, curr_player: Player, depth: usize, cache: Arc<Mutex<HashMap<usize, (Player, Player)>>>) -> Player {
     if moves.contains(&nb_stones) {
         if DEBUG {
             print!("{}", "\t".repeat(depth));
@@ -42,7 +46,7 @@ fn batchet_turn(nb_stones: usize, moves: &Vec<usize>, curr_player: Player, depth
         return winner;
     }
 
-    if let Some((first_player, winner)) = cache.get(&nb_stones) {
+    if let Some((first_player, winner)) = cache.lock().unwrap().get(&nb_stones) {
         let new_winner = if *first_player != curr_player { winner.other() } else { *winner };
         if DEBUG {
             print!("{}", "\t".repeat(depth));
@@ -60,8 +64,8 @@ fn batchet_turn(nb_stones: usize, moves: &Vec<usize>, curr_player: Player, depth
             print!("{}", "\t".repeat(depth));
             println!("Player: {:?}, nb_stones: {}, move: {}", curr_player, nb_stones, stone_move);
         }
-        let next_turn = batchet_turn(nb_stones - stone_move, moves, curr_player.other(), depth + 1, cache);
-        cache.insert(nb_stones - stone_move, (curr_player.other(), next_turn));
+        let next_turn = batchet_turn(nb_stones - stone_move, moves, curr_player.other(), depth + 1, cache.clone());
+        cache.lock().unwrap().insert(nb_stones - stone_move, (curr_player.other(), next_turn));
         if next_turn == curr_player {
             return curr_player;
         }
@@ -95,38 +99,41 @@ fn batchet(input: &str) {
 
     // always a 1 in moves, moves max length is 10
 
-    let mut cache = HashMap::new();
+    let cache = Arc::new(Mutex::new(HashMap::new()));
 
     if nb_stones > CACHE_SIZE {
-        for i in 1..(nb_stones / CACHE_SIZE) {
+        (1..(nb_stones / CACHE_SIZE)).map(|i| {
             let cache_size = i * CACHE_SIZE;
-            batchet_turn(cache_size, &moves, Player::Stan, 0, &mut cache);
-        }
+            let moves = moves.clone();
+            let cache = cache.clone();
+            thread::spawn(move || {
+                batchet_turn(cache_size, &moves, Player::Stan, 0, cache);
+            })
+        }).for_each(|t| t.join().unwrap())
     }
-    let winner = batchet_turn(nb_stones, &moves, Player::Stan, 0, &mut cache);
+    let winner = batchet_turn(nb_stones, &moves, Player::Stan, 0, cache);
     println!("{:?} wins", winner)
 }
 
 
 fn main() {
-    let stdin = io::stdin();
-    for line in stdin.lock().lines().map(|l| l.unwrap()) {
+    //let stdin = io::stdin();
+    //for line in stdin.lock().lines().map(|l| l.unwrap()) {
+    for line in "20 3 1 3 8\n21 3 1 3 8\n22 3 1 3 8\n23 3 1 3 8\n1000000 10 1 23 38 11 7 5 4 8 3 13\n999996 10 1 23 38 11 7 5 4 8 3 13\n".split('\n') {
         if line.trim().is_empty() { break; }
         batchet(line.trim());
     }
 }
 
-
-#[cfg(test)]
+/*#[cfg(test)]
 mod test {
-    use crate::batchet;
+    use super::batchet;
 
     #[test]
-    #[export_name = "name"]
     fn test() {
         for line in "20 3 1 3 8\n21 3 1 3 8\n22 3 1 3 8\n23 3 1 3 8\n1000000 10 1 23 38 11 7 5 4 8 3 13\n999996 10 1 23 38 11 7 5 4 8 3 13\n".split('\n') {
             if line.trim().is_empty() { break; }
             batchet(line.trim());
         }
     }
-}
+}*/
